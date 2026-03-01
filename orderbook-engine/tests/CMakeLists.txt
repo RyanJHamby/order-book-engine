@@ -1,12 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Find Google Test
 find_package(GTest REQUIRED)
 
-# Include directories
 include_directories(../include)
 
-# Test sources
 set(TEST_SOURCES
     test_order.cpp
     test_orderbook.cpp
@@ -18,20 +15,21 @@ set(TEST_SOURCES
     test_concurrency.cpp
 )
 
-# Create test executable
 add_executable(orderbook_tests ${TEST_SOURCES})
 
-# Link with Google Test and main library
-target_link_libraries(orderbook_tests 
-    GTest::GTest 
+# GTest requires exceptions and RTTI — override parent flags for test target.
+target_compile_options(orderbook_tests PRIVATE -fexceptions -frtti)
+
+target_link_libraries(orderbook_tests
+    GTest::GTest
     GTest::Main
 )
 
-# Add main library sources (exclude the main.cpp entry point).
-file(GLOB MAIN_SOURCES "../src/*.cpp")
-list(REMOVE_ITEM MAIN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../src/main.cpp")
-target_sources(orderbook_tests PRIVATE ${MAIN_SOURCES})
+# Library sources (explicit list, no glob).
+target_sources(orderbook_tests PRIVATE
+    ../src/orderbook.cpp
+    ../src/order.cpp
+)
 
-# Enable testing
 enable_testing()
 add_test(NAME OrderBookTests COMMAND orderbook_tests)

@@ -46,13 +46,12 @@ TEST_F(EdgeCaseTest, OrderVerySmallPrice) {
 }
 
 TEST_F(EdgeCaseTest, OrderBookEmptyOperations) {
-    EXPECT_NO_THROW(ob.match_orders());
     EXPECT_FALSE(ob.cancel_order(999));
+    EXPECT_EQ(ob.fill_count(), 0u);
 
     Order single{1, OrderType::BUY, 100.0, 10};
     ob.add_order(single);
     EXPECT_EQ(ob.bid_count(), 1u);
-    EXPECT_NO_THROW(ob.match_orders());
 }
 
 TEST_F(EdgeCaseTest, OrderBookSingleOrderType) {

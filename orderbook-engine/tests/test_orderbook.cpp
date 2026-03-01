@@ -102,8 +102,11 @@ TEST_F(OrderBookTest, CancelOrder) {
     EXPECT_FALSE(ob.cancel_order(999));
 }
 
-TEST_F(OrderBookTest, MatchOrdersEmptyBook) {
-    EXPECT_NO_THROW(ob.match_orders());
+TEST_F(OrderBookTest, EmptyBookOperations) {
+    EXPECT_EQ(ob.bid_count(), 0u);
+    EXPECT_EQ(ob.ask_count(), 0u);
+    EXPECT_EQ(ob.fill_count(), 0u);
+    EXPECT_FALSE(ob.cancel_order(999));
 }
 
 TEST_F(OrderBookTest, StressTest) {

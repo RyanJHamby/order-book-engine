@@ -79,10 +79,6 @@ inline void OrderBook::try_match_sell(Order& incoming) {
     }
 }
 
-void OrderBook::match_orders() {
-    // Continuous matching resolves all crosses in add_order().
-    // This method exists for API compatibility.
-}
 
 bool OrderBook::cancel_order(std::uint64_t order_id) {
     auto it = order_index_.find(order_id);

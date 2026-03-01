@@ -1,18 +1,22 @@
 // memory_pool.hpp
 // Thread-local slab allocator for fixed-size objects.
 // Pre-allocates slabs of memory; pointers remain stable across growth.
+// Each thread gets its own pool instance via thread_local — zero contention
+// in the allocation hot path.
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <cstdlib>
-#include <memory>
 #include <vector>
 
 // Slab-based pool: allocates objects from fixed-size slabs.
 // When a slab is exhausted, a new one is allocated. Existing pointers
 // remain valid because slabs are never moved or freed until the pool
-// is destroyed.
+// is destroyed. This avoids the pointer-invalidation problem of
+// std::vector-based pools.
+//
+// NOT thread-safe: each thread must own its own instance (see
+// get_thread_local_pool below).
 template<typename T>
 class ThreadLocalPool {
 public:
@@ -38,6 +42,8 @@ public:
         return &current_slab_[index_++];
     }
 
+    std::size_t slab_count() const { return slabs_.size(); }
+
 private:
     void allocate_slab() {
         auto* slab = static_cast<T*>(std::malloc(slab_capacity_ * sizeof(T)));
@@ -49,36 +55,14 @@ private:
     std::size_t slab_capacity_;
     std::size_t index_{0};
     T* current_slab_{nullptr};
-    std::vector<T*> slabs_;  // owns all slab allocations
+    std::vector<T*> slabs_;
 };
 
-// Convenience: per-thread pool instance via thread_local.
-// Each thread gets its own pool — zero contention.
+// Per-thread pool instance via thread_local.
+// Each thread gets its own pool — zero contention, zero locking.
+// WARNING: Do not pass the returned reference to another thread.
 template<typename T>
 inline ThreadLocalPool<T>& get_thread_local_pool(std::size_t slab_capacity = 4096) {
     thread_local ThreadLocalPool<T> pool(slab_capacity);
     return pool;
 }
-
-namespace ob {
-
-class MemoryPool {
-public:
-    explicit MemoryPool(std::size_t block_size, std::size_t block_count);
-    ~MemoryPool();
-
-    MemoryPool(const MemoryPool&) = delete;
-    MemoryPool& operator=(const MemoryPool&) = delete;
-
-    void* allocate();
-    void deallocate(void* ptr) noexcept;
-
-private:
-    std::size_t block_size_;
-    std::size_t block_count_;
-    std::uint8_t* pool_;       // contiguous memory region
-    std::uint8_t** free_list_; // stack of free block pointers
-    std::size_t free_count_;
-};
-
-} // namespace ob
