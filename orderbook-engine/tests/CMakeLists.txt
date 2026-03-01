@@ -27,8 +27,9 @@ target_link_libraries(orderbook_tests
     GTest::Main
 )
 
-# Add main library sources
+# Add main library sources (exclude the main.cpp entry point).
 file(GLOB MAIN_SOURCES "../src/*.cpp")
+list(REMOVE_ITEM MAIN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../src/main.cpp")
 target_sources(orderbook_tests PRIVATE ${MAIN_SOURCES})
 
 # Enable testing

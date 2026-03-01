@@ -35,13 +35,14 @@ TEST_F(OrderQueueTest, EmptyQueuePop) {
 }
 
 TEST_F(OrderQueueTest, FullQueuePush) {
-    LockFreeQueue<Order, 3> queue;
-    
+    // Ring buffer of size N holds N-1 items (one sentinel slot).
+    LockFreeQueue<Order, 4> queue;
+
     Order order1{1, OrderType::BUY, 100.0, 10};
     Order order2{2, OrderType::SELL, 200.0, 20};
     Order order3{3, OrderType::BUY, 300.0, 30};
     Order order4{4, OrderType::SELL, 400.0, 40};
-    
+
     EXPECT_TRUE(queue.push(order1));
     EXPECT_TRUE(queue.push(order2));
     EXPECT_TRUE(queue.push(order3));
@@ -49,23 +50,23 @@ TEST_F(OrderQueueTest, FullQueuePush) {
 }
 
 TEST_F(OrderQueueTest, CircularBehavior) {
-    LockFreeQueue<Order, 3> queue;
-    
+    LockFreeQueue<Order, 4> queue;
+
     Order order1{1, OrderType::BUY, 100.0, 10};
     Order order2{2, OrderType::SELL, 200.0, 20};
     Order order3{3, OrderType::BUY, 300.0, 30};
-    
-    // Fill queue
+
+    // Fill to capacity (N-1 = 3 items).
     EXPECT_TRUE(queue.push(order1));
     EXPECT_TRUE(queue.push(order2));
     EXPECT_TRUE(queue.push(order3));
-    
-    // Pop one
+
+    // Pop one to free a slot.
     Order popped{0, OrderType::SELL, 0.0, 0};
     EXPECT_TRUE(queue.pop(popped));
-    EXPECT_EQ(popped.id, 1);
-    
-    // Should be able to push again
+    EXPECT_EQ(popped.id, 1u);
+
+    // Should wrap around and push again.
     Order order4{4, OrderType::SELL, 400.0, 40};
     EXPECT_TRUE(queue.push(order4));
 }
