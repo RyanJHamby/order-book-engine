@@ -1,5 +1,5 @@
 // latency_test.cpp
-// Benchmarks the full pipeline: queue ingestion + matching engine.
+// Benchmarks the full pipeline: pool allocation -> queue ingestion -> matching.
 // Measures per-operation latency with P50/P95/P99/P99.9 percentiles.
 #include "orderbook.hpp"
 #include "order_queue.hpp"
@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <thread>
 #include <atomic>
-#include <cmath>
 
 static void print_percentiles(std::vector<double>& latencies_ns) {
     std::sort(latencies_ns.begin(), latencies_ns.end());
@@ -45,55 +44,74 @@ int main() {
     std::uniform_real_distribution<double> price_dist(99.0, 101.0);
     std::uniform_int_distribution<int> qty_dist(1, 100);
 
-    // Pre-generate orders.
-    std::vector<Order> orders;
-    orders.reserve(NUM_ORDERS);
-    for (int i = 0; i < NUM_ORDERS; ++i) {
-        orders.push_back({static_cast<std::uint64_t>(i),
-                         i % 2 ? OrderType::BUY : OrderType::SELL,
-                         price_dist(rng),
-                         static_cast<std::uint32_t>(qty_dist(rng))});
-    }
-
-    // ---------- Benchmark 1: Direct matching (hot path) ----------
+    // ---------- Benchmark 1: Pool alloc + matching (per-order latency) ----------
     {
-        std::cout << "=== Direct add_order latency (1M orders) ===\n";
+        std::cout << "=== Pool alloc + add_order latency (1M orders) ===\n";
         OrderBook ob;
+        ThreadLocalPool<Order> pool(NUM_ORDERS);
 
-        // Warmup.
-        for (int i = 0; i < 10000; ++i) ob.add_order(orders[i]);
-        ob = OrderBook();
+        // Warmup: exercise the matching engine code paths.
+        {
+            OrderBook warmup_ob;
+            ThreadLocalPool<Order> warmup_pool(10000);
+            for (int i = 0; i < 10000; ++i) {
+                Order* o = warmup_pool.allocate();
+                *o = {static_cast<std::uint64_t>(i),
+                      i % 2 ? OrderType::BUY : OrderType::SELL,
+                      price_dist(rng), static_cast<std::uint32_t>(qty_dist(rng))};
+                warmup_ob.add_order(*o);
+            }
+        }
+        rng.seed(42);
 
         std::vector<double> latencies;
         latencies.reserve(NUM_ORDERS);
 
         for (int i = 0; i < NUM_ORDERS; ++i) {
             auto t0 = std::chrono::high_resolution_clock::now();
-            ob.add_order(orders[i]);
+
+            Order* o = pool.allocate();
+            *o = {static_cast<std::uint64_t>(i),
+                  i % 2 ? OrderType::BUY : OrderType::SELL,
+                  price_dist(rng), static_cast<std::uint32_t>(qty_dist(rng))};
+            ob.add_order(*o);
+
             auto t1 = std::chrono::high_resolution_clock::now();
             latencies.push_back(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
         }
 
         std::cout << "  Orders: " << NUM_ORDERS
-                  << "  Fills: " << ob.get_fills().size() << "\n";
+                  << "  Fills: " << ob.fill_count()
+                  << "  Slabs: " << pool.slab_count() << "\n";
         print_percentiles(latencies);
     }
 
-    // ---------- Benchmark 2: Queue -> matching pipeline ----------
+    // ---------- Benchmark 2: Full pipeline (pool -> queue -> match) ----------
     {
-        std::cout << "\n=== Queue pipeline latency (1M orders) ===\n";
+        std::cout << "\n=== Full pipeline: pool -> queue -> match (1M orders) ===\n";
         LockFreeQueue<Order, Q_SIZE> queue;
         OrderBook ob;
         std::atomic<bool> producer_done{false};
 
+        // Producer: allocate from thread-local pool, push to queue.
         std::thread producer([&]() {
+            auto& pool = get_thread_local_pool<Order>(NUM_ORDERS);
+            std::mt19937 prng(42);
+            std::uniform_real_distribution<double> pd(99.0, 101.0);
+            std::uniform_int_distribution<int> qd(1, 100);
+
             for (int i = 0; i < NUM_ORDERS; ++i) {
-                while (!queue.push(orders[i])) std::this_thread::yield();
+                Order* o = pool.allocate();
+                *o = {static_cast<std::uint64_t>(i),
+                      i % 2 ? OrderType::BUY : OrderType::SELL,
+                      pd(prng), static_cast<std::uint32_t>(qd(prng))};
+                while (!queue.push(*o)) std::this_thread::yield();
             }
             producer_done.store(true, std::memory_order_release);
         });
 
+        // Consumer / matching thread.
         auto t0 = std::chrono::high_resolution_clock::now();
         int consumed = 0;
         Order incoming{0, OrderType::BUY, 0.0, 0};
@@ -119,7 +137,7 @@ int main() {
         double per_order_us = total_us / consumed;
 
         std::cout << "  Orders: " << consumed
-                  << "  Fills: " << ob.get_fills().size() << "\n";
+                  << "  Fills: " << ob.fill_count() << "\n";
         std::cout << "  Total:  " << total_us / 1000.0 << " ms\n";
         std::cout << "  Avg:    " << per_order_us << " us/order\n";
         std::cout << "  Throughput: "
