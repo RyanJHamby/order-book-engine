@@ -1,17 +1,24 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+echo "=== Building OrderBook Engine ==="
 rm -rf build
 mkdir build
 cd build
 
-cmake ..
-make -j$(sysctl -n hw.ncpu)
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
-echo "=== Running orderbook ==="
+echo ""
+echo "=== Running orderbook demo ==="
 ./orderbook || true
 
+echo ""
+echo "=== Running unit tests ==="
+./tests/orderbook_tests || true
+
+echo ""
 echo "=== Running latency benchmark ==="
-./latency_benchmark || true
+./latency_benchmark | tee benchmark_results.txt
