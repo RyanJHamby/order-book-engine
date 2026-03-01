@@ -1,7 +1,0 @@
-/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/CMakeFiles/orderbook.dir
-/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/CMakeFiles/latency_benchmark.dir
-/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/CMakeFiles/edit_cache.dir
-/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/CMakeFiles/rebuild_cache.dir
-/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/tests/CMakeFiles/orderbook_tests.dir
-/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/tests/CMakeFiles/edit_cache.dir
-/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/tests/CMakeFiles/rebuild_cache.dir

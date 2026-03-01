@@ -1,8 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/cmake_install.cmake",
-		"/Users/ryanhamby/Documents/OrderBookEngine/orderbook-engine/build/tests/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
