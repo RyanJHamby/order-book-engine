@@ -1,1 +1,23 @@
 *.pem
+
+# Build artifacts
+build/
+orderbook-engine/build/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Benchmark / test output
+*.log
+benchmark_results/
+
+# AWS
+.env
