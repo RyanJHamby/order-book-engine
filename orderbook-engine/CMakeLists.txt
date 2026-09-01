@@ -8,6 +8,12 @@ set(CMAKE_CXX_STANDARD 20)
 # below (TSan wants -O1 and no LTO for accurate, symbolized stack traces).
 option(ENABLE_TSAN "Build with ThreadSanitizer instrumentation" OFF)
 
+# perf/flame-graph build: keeps the release optimization level (-O3, LTO,
+# etc.) so the profile reflects real hot-path behavior, but adds debug
+# symbols and frame pointers so `perf record -g` can symbolize and unwind
+# stacks. Linux-only in practice (perf); see scripts/cloud_init.sh.
+option(ENABLE_PROFILING "Add -g -fno-omit-frame-pointer to the release build for perf" OFF)
+
 if(ENABLE_TSAN)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g -O1 -fno-omit-frame-pointer -fno-exceptions -fno-rtti -pthread")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
@@ -22,6 +28,9 @@ else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -flto -fno-exceptions -fno-rtti -pthread")
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
+  endif()
+  if(ENABLE_PROFILING)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fno-omit-frame-pointer")
   endif()
 endif()
 

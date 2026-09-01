@@ -115,3 +115,4 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 BUCKET_NAME="orderbook-benchmark-${ACCOUNT_ID}"
 echo "Results: aws s3 ls s3://$BUCKET_NAME/"
 echo "Fetch:   aws s3 cp s3://$BUCKET_NAME/ ./results/ --recursive"
+echo "Flame graph: fetch perf_script_*.txt above and drag it into https://www.speedscope.app/"

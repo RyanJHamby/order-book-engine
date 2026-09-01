@@ -31,6 +31,11 @@ apt-get install -y build-essential cmake git linux-tools-common linux-tools-aws 
     echo ""
 } > "$RESULTS_DIR/system_info.txt"
 
+# ---------- perf permissions ----------
+# Allow perf_event access for call-graph recording (default kernel policy
+# on Ubuntu restricts this even for root in some configs).
+sysctl -w kernel.perf_event_paranoid=-1 || true
+
 # ---------- CPU isolation for benchmarking ----------
 # Disable turbo boost for consistent measurements.
 if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
@@ -49,7 +54,7 @@ git clone "$REPO_URL" || echo "Repo already exists"
 cd "$PROJECT_DIR"
 
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_PROFILING=ON
 make -j$(nproc)
 
 # ---------- Run tests ----------
@@ -66,6 +71,21 @@ echo "=== perf stat ===" >> "$RESULTS_DIR/benchmark_results.txt"
 taskset -c 1 perf stat -e cache-misses,cache-references,instructions,cycles,L1-dcache-load-misses,branch-misses \
     ./latency_benchmark >> /dev/null 2>> "$RESULTS_DIR/benchmark_results.txt" || \
     echo "perf stat unavailable (no permissions or kernel support)" >> "$RESULTS_DIR/benchmark_results.txt"
+
+# ---------- perf record for flame graph ----------
+# Built with -DENABLE_PROFILING=ON (release flags + -g -fno-omit-frame-pointer)
+# so this profiles real hot-path behavior, symbolized. Output is raw
+# `perf script` text, which speedscope.app imports directly (drag-and-drop) —
+# no need for Brendan Gregg's FlameGraph scripts or an SVG conversion step.
+echo "=== perf record (flame graph) ==="
+if taskset -c 1 perf record -F 999 -g --call-graph dwarf \
+    -o "$RESULTS_DIR/perf.data" -- ./latency_benchmark; then
+    perf script -i "$RESULTS_DIR/perf.data" > "$RESULTS_DIR/perf_script.txt" \
+        || echo "perf script conversion failed" > "$RESULTS_DIR/perf_script.txt"
+    rm -f "$RESULTS_DIR/perf.data"
+else
+    echo "perf record failed (no permissions or kernel support)" > "$RESULTS_DIR/perf_script.txt"
+fi
 
 # ---------- Upload to S3 ----------
 ACCOUNT_ID=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r '.accountId')

@@ -4,17 +4,25 @@ A high-performance C++ order matching engine built for sub-microsecond latency. 
 
 ## Performance
 
-Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills):
+Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills). Pool allocation + matching in the timed loop.
 
-| Metric | Value |
-|--------|-------|
-| P50 latency | 0.21 us |
-| P95 latency | 1.5 us |
-| P99 latency | 2.6 us |
-| P99.9 latency | 5.7 us |
-| Pipeline throughput | 2.4M orders/sec |
+| Metric | Apple Silicon (local, `scripts/run_benchmark.sh` not run here) | EC2 `c6i.large` (Intel Xeon Ice Lake, real target hardware) |
+|--------|---|---|
+| P50 latency | 0.21 us | *pending — run `scripts/run_benchmark.sh`* |
+| P95 latency | 1.5 us | *pending* |
+| P99 latency | 2.6 us | *pending* |
+| P99.9 latency | 4.7–5.2 us | *pending* |
+| Pipeline throughput | 2.5–2.7M orders/sec | *pending* |
 
-*Measured with pool allocation + matching in the timed loop. Numbers from local Apple Silicon; EC2 `c6i.large` (Intel Xeon Ice Lake) numbers via `scripts/run_benchmark.sh`.*
+Apple Silicon numbers come from an interactive local dev machine — not a
+representative, isolated benchmark environment (no CPU pinning, no turbo/governor
+control, shared with everything else running on the laptop). They're useful as a
+sanity check while iterating, but the **EC2 numbers are the ones that should be
+cited** anywhere these results are referenced (resume, portfolio, etc.):
+`cloud_init.sh` pins the benchmark to an isolated core (`taskset -c 1`), disables
+turbo boost, and sets the CPU governor to `performance` for reproducibility —
+none of which is possible or meaningful on a laptop. Run `scripts/run_benchmark.sh`
+to populate the EC2 column with real numbers before citing them anywhere.
 
 ## Architecture
 
@@ -140,11 +148,22 @@ Automated profiling on `c6i.large` (Intel Xeon Ice Lake) Spot instances:
 The cloud-init script:
 - Disables turbo boost and sets the CPU governor to `performance` for stable measurements
 - Pins the benchmark to a single core via `taskset` to avoid scheduler jitter
+- Builds with `-DENABLE_PROFILING=ON` (keeps `-O3`/LTO, adds `-g -fno-omit-frame-pointer` for symbolized profiling)
 - Runs `perf stat` for hardware counters (cache misses, IPC, branch mispredicts)
+- Runs `perf record -g --call-graph dwarf` for a flame graph, converts to `perf script` text via `perf_script.txt`
 - Captures system info (CPU model, AVX2 flags, kernel version)
 - Uploads results to S3 with timestamps
 
 Spot instances run at ~70% discount vs. on-demand. The script reports the exact savings percentage.
+
+### Flame graphs
+
+`perf_script_<timestamp>.txt` in the uploaded results is raw `perf script`
+output — drag it into [speedscope.app](https://www.speedscope.app/) directly
+(no FlameGraph.pl / SVG conversion step needed; speedscope's linux-perf
+importer reads it as-is). This only works from the EC2 run: `perf` is
+Linux-only, and macOS has no equivalent that produces this format — flame
+graphs for this project are EC2-only, not something to attempt locally.
 
 ## Project Structure
 
