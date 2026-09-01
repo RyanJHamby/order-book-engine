@@ -108,6 +108,23 @@ make -j$(nproc)
 ./scripts/run_tests.sh
 ```
 
+### ThreadSanitizer
+
+The concurrency guarantees (`ConcurrencyTest`, the SPSC queue in
+`order_queue.hpp`) are validated under ThreadSanitizer:
+
+```bash
+./scripts/run_tsan.sh
+```
+
+Builds a separate `build-tsan/` tree with `-DENABLE_TSAN=ON` (`-fsanitize=thread
+-O1 -g`, no `-march=native`/`-flto`) and runs the full test suite plus the
+latency benchmark through it. On macOS, Apple Clang's bundled TSan runtime
+crashes at startup on recent OS versions (dyld shared cache format changed);
+the script auto-detects and uses Homebrew LLVM (`brew install llvm`) instead
+if present. TSan throughput numbers are ~5-10x slower than native and are not
+representative — use `scripts/run_benchmark.sh` for real performance numbers.
+
 ## EC2 Spot Benchmarking
 
 Automated profiling on `c6i.large` (Intel Xeon Ice Lake) Spot instances:
