@@ -51,24 +51,33 @@ section re-runs the identical producer/consumer pipeline (same pool, same
 measured speedup instead of an assumed one — same discipline as the
 baseline/optimized comparisons in `measured-speedup-harness`.
 
-| | Apple Silicon (local, informal) | EC2 `c6i.large` |
+| | Apple Silicon (local, informal) | EC2 `c6i.large` (2 vCPU, 2 runs) |
 |---|---|---|
-| Lock-free SPSC | 2.26M orders/sec | *pending — re-run `scripts/run_benchmark.sh`* |
-| mutex+queue | 2.17M orders/sec | *pending* |
-| Speedup | **1.04x** | *pending* |
+| Lock-free SPSC | 2.26M orders/sec | 1.36–1.48M orders/sec |
+| mutex+queue | 2.17M orders/sec | 2.31–2.66M orders/sec |
+| Speedup | **1.04x** | **0.56–0.59x** |
 
-That's a genuinely small number, and it's reported as measured rather than
-reframed to look better — Amdahl's Law in action. `OrderBook::add_order`
-(the `std::map` red-black-tree rebalancing the flame graph already
-identifies as the dominant cost) takes roughly the same time regardless of
-which queue feeds it, so the queue's contribution to *this* workload's
-end-to-end throughput is small even though it's wait-free in isolation. The
-lock-free queue's real value proposition here is bounded tail latency under
-contention (proven race-free under TSan — see above), not raw throughput on
-a 2-thread, single-producer pipeline; a multi-producer or higher-contention
-scenario would likely show a larger gap. TSan run separately shows the same
-pattern (1.33x) at a much lower absolute scale, consistent with a real if
-modest effect rather than noise.
+**The lock-free queue is faster on the laptop and *slower* on EC2 —
+confirmed across 2 separate runs, not noise.** This isn't the result the
+project's own framing assumed going in, and it's reported as measured
+rather than smoothed over: the SPSC queue's `push`/`pop` spin (`while
+(!queue.push(...)) std::this_thread::yield();`) when the queue is full or
+empty. On the 10+-core Apple Silicon laptop there's always an idle core for
+that spin to burn without stealing time from the other thread. On a
+`c6i.large`'s 2 vCPUs, a producer and a matching thread fill both cores —
+spinning one of them competes directly with the other for CPU time, while
+`std::condition_variable` actually blocks the waiting thread and hands the
+core back to the scheduler. Lock-free/spin-wait designs are a bet on having
+idle cores to spin on; that bet pays off on the dev laptop and loses on a
+2-vCPU cloud instance. `OrderBook::add_order`'s `std::map` rebalancing
+(the flame graph's dominant cost) still dominates *both* configurations'
+absolute throughput — the queue choice is a real but secondary effect,
+visible only once you actually measure it instead of assuming a lock-free
+design is strictly better. The lock-free queue's proven value here is
+data-race freedom under contention (TSan — see above), not raw throughput
+on a core-constrained box; a busier, higher-core-count production box would
+likely flip this back in the SPSC design's favor, which is itself worth
+verifying rather than assuming.
 
 ## Architecture
 

@@ -267,15 +267,21 @@ Measures end-to-end including cross-thread communication overhead. ~2.5–2.7M o
 ```
 
 Isolates the one variable that matters: does the lock-free queue actually
-beat the obvious alternative? Measured (Apple Silicon, informal): lock-free
-SPSC 2.26M orders/sec vs. mutex+queue 2.17M orders/sec — a 1.04x speedup.
-Small, and reported as measured rather than reframed: `OrderBook::add_order`
-(`std::map` rebalancing, confirmed dominant cost by the EC2 flame graph)
-takes roughly the same time regardless of which queue feeds it, so the
-queue's contribution to this specific workload's end-to-end throughput is
-limited even though it's wait-free in isolation. See the main README's
-Performance section for the full discussion, including the TSan-instrumented
-run showing the same pattern (1.33x) at lower absolute scale.
+beat the obvious alternative? The honest answer is hardware-dependent, and
+this benchmark is what surfaced that rather than assuming it: Apple
+Silicon (informal) shows a 1.04x speedup for the lock-free SPSC (2.26M vs.
+2.17M orders/sec), but 2 separate EC2 `c6i.large` runs both show a
+*regression* -- 0.56-0.59x (1.36-1.48M SPSC vs. 2.31-2.66M mutex+queue).
+Root cause: the SPSC queue's `push`/`pop` spin-yield when full/empty burns
+a core doing nothing useful; on a 10+-core laptop there's always an idle
+core to burn, but on a 2-vCPU `c6i.large` the producer and matching thread
+already fill both cores, so spinning steals cycles from the other thread --
+`std::condition_variable` blocking and handing the core back to the
+scheduler wins there instead. `OrderBook::add_order`'s `std::map`
+rebalancing (the flame graph's dominant cost) still dominates absolute
+throughput in both configurations; the queue choice is a real but
+secondary effect that only a real hardware-matched benchmark reveals. See
+the main README's Performance section for the full writeup.
 
 ### Percentile Calculation
 
