@@ -272,16 +272,22 @@ this benchmark is what surfaced that rather than assuming it: Apple
 Silicon (informal) shows a 1.04x speedup for the lock-free SPSC (2.26M vs.
 2.17M orders/sec), but 2 separate EC2 `c6i.large` runs both show a
 *regression* -- 0.56-0.59x (1.36-1.48M SPSC vs. 2.31-2.66M mutex+queue).
-Root cause: the SPSC queue's `push`/`pop` spin-yield when full/empty burns
-a core doing nothing useful; on a 10+-core laptop there's always an idle
-core to burn, but on a 2-vCPU `c6i.large` the producer and matching thread
-already fill both cores, so spinning steals cycles from the other thread --
-`std::condition_variable` blocking and handing the core back to the
-scheduler wins there instead. `OrderBook::add_order`'s `std::map`
+
+Root cause is more specific than "only 2 vCPUs": `cloud_init.sh` runs the
+benchmark under `taskset -c 1`, which pins the whole process -- both the
+producer and matching threads -- to a single core, sharing it via OS
+time-slicing rather than each getting a dedicated core. The SPSC queue's
+`push`/`pop` spin-yield when full/empty is a bet that there's an idle core
+to burn; free on a 10+-core laptop, but actively hostile on one shared
+core, where a spinning thread steals the other thread's only chance to
+run. `std::condition_variable` blocking and handing the core back to the
+scheduler wins there instead. `cloud_init.sh` also runs the benchmark
+under `taskset -c 0,1` (both vCPUs, real thread parallelism) specifically
+to test this hypothesis -- see the main README's Performance section for
+both configurations' numbers. `OrderBook::add_order`'s `std::map`
 rebalancing (the flame graph's dominant cost) still dominates absolute
-throughput in both configurations; the queue choice is a real but
-secondary effect that only a real hardware-matched benchmark reveals. See
-the main README's Performance section for the full writeup.
+throughput regardless of CPU affinity; the queue choice is a real but
+secondary effect that only a real hardware-matched benchmark reveals.
 
 ### Percentile Calculation
 
@@ -305,7 +311,7 @@ Automated benchmarking on `c6i.large` (Intel Xeon Ice Lake, 2 vCPU) with CPU iso
 |-----------|---------|
 | `echo 1 > intel_pstate/no_turbo` | Disable turbo boost — prevents frequency scaling during measurement |
 | `echo performance > scaling_governor` | Lock CPU at max frequency — no dynamic scaling |
-| `taskset -c 1` | Pin benchmark to single core — avoid scheduler migration |
+| `taskset -c 1` | Pin the whole benchmark process to one core — avoid scheduler migration and core-0 OS/interrupt noise. Also run once more under `taskset -c 0,1` (both vCPUs) to test whether single-core thread sharing, not core count alone, explains the SPSC-vs-mutex reversal (see Benchmark 3) |
 | `perf stat` | Hardware counters: cache misses, IPC, branch mispredictions |
 
 ### Pipeline

@@ -97,8 +97,24 @@ echo "=== Running unit tests ===" | tee "$RESULTS_DIR/test_results.txt"
 ./tests/orderbook_tests 2>&1 | tee -a "$RESULTS_DIR/test_results.txt" || true
 
 # ---------- Run benchmark (pinned to core 1 to avoid scheduler jitter) ----------
+# Note: `taskset -c 1` pins the WHOLE PROCESS to a single core -- on this
+# 2-vCPU instance, the producer and matching threads share that one core
+# via OS time-slicing, they don't each get a dedicated core. That's a
+# deliberate isolation choice (core 0 tends to carry more OS/interrupt
+# load) but it also means Benchmark 3's SPSC-vs-mutex comparison below
+# isn't testing the two threads running in true parallel. See the dual-core
+# run further down for the comparison with actual thread parallelism.
 echo "=== Running latency benchmark ===" | tee "$RESULTS_DIR/benchmark_results.txt"
 taskset -c 1 ./latency_benchmark 2>&1 | tee -a "$RESULTS_DIR/benchmark_results.txt"
+
+# ---------- Run benchmark again pinned to both vCPUs (real thread parallelism) ----------
+# Isolates the CPU-affinity variable in the SPSC-vs-mutex baseline
+# comparison: does the lock-free queue's spin-yield disadvantage (see
+# Benchmark 3's write-up) go away once the producer and matching thread
+# actually have a core each, instead of fighting over one?
+echo "=== Running latency benchmark (taskset -c 0,1: real thread parallelism) ===" \
+    | tee "$RESULTS_DIR/benchmark_results_dualcore.txt"
+taskset -c 0,1 ./latency_benchmark 2>&1 | tee -a "$RESULTS_DIR/benchmark_results_dualcore.txt"
 
 # ---------- perf stat for hardware counters ----------
 echo "" >> "$RESULTS_DIR/benchmark_results.txt"

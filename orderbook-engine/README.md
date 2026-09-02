@@ -60,24 +60,38 @@ baseline/optimized comparisons in `measured-speedup-harness`.
 **The lock-free queue is faster on the laptop and *slower* on EC2 —
 confirmed across 2 separate runs, not noise.** This isn't the result the
 project's own framing assumed going in, and it's reported as measured
-rather than smoothed over: the SPSC queue's `push`/`pop` spin (`while
-(!queue.push(...)) std::this_thread::yield();`) when the queue is full or
-empty. On the 10+-core Apple Silicon laptop there's always an idle core for
-that spin to burn without stealing time from the other thread. On a
-`c6i.large`'s 2 vCPUs, a producer and a matching thread fill both cores —
-spinning one of them competes directly with the other for CPU time, while
-`std::condition_variable` actually blocks the waiting thread and hands the
-core back to the scheduler. Lock-free/spin-wait designs are a bet on having
-idle cores to spin on; that bet pays off on the dev laptop and loses on a
-2-vCPU cloud instance. `OrderBook::add_order`'s `std::map` rebalancing
-(the flame graph's dominant cost) still dominates *both* configurations'
-absolute throughput — the queue choice is a real but secondary effect,
-visible only once you actually measure it instead of assuming a lock-free
-design is strictly better. The lock-free queue's proven value here is
-data-race freedom under contention (TSan — see above), not raw throughput
-on a core-constrained box; a busier, higher-core-count production box would
-likely flip this back in the SPSC design's favor, which is itself worth
-verifying rather than assuming.
+rather than smoothed over. Root cause, and it's more specific than "only 2
+vCPUs": `cloud_init.sh` runs the benchmark under `taskset -c 1`, which pins
+the *whole process* — both the producer and matching threads — to a
+single core. They don't get one core each; they share one core via OS
+time-slicing. The SPSC queue's `push`/`pop` spin (`while (!queue.push(...))
+std::this_thread::yield();`) is a bet that there's an idle core to burn
+while waiting. On the 10+-core Apple Silicon laptop that bet is free — an
+idle core is always available. Confined to a single shared core, a
+spinning thread is actively stealing the *other* thread's only chance to
+run, while `std::condition_variable`'s blocking wait immediately hands
+that core back to the scheduler. `OrderBook::add_order`'s `std::map`
+rebalancing (the flame graph's dominant cost) still dominates *both*
+configurations' absolute throughput — the queue choice is a real but
+secondary effect, visible only once you actually measure it instead of
+assuming a lock-free design is strictly better.
+
+Since the hypothesis is specifically about single-core sharing, not just
+core *count*, `cloud_init.sh` also runs the same benchmark under `taskset
+-c 0,1` — both vCPUs, so the two threads can actually run in parallel
+instead of time-slicing one core — and reports both configurations
+side by side:
+
+| | `taskset -c 1` (single core, current default) | `taskset -c 0,1` (dual core) |
+|---|---|---|
+| Lock-free SPSC | 1.36–1.48M orders/sec | *pending — re-run `scripts/run_benchmark.sh`* |
+| mutex+queue | 2.31–2.66M orders/sec | *pending* |
+| Speedup | 0.56–0.59x | *pending* |
+
+The lock-free queue's proven value here is data-race freedom under
+contention (TSan — see above), not raw throughput on a single shared core;
+if the dual-core hypothesis holds, real thread parallelism should close or
+reverse this gap.
 
 ## Architecture
 
