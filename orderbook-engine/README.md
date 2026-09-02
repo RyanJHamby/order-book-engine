@@ -2,6 +2,14 @@
 
 A high-performance C++ order matching engine built for sub-microsecond latency. Implements continuous price-time priority matching with lock-free order ingestion, thread-local memory pools, and automated EC2 Spot benchmarking with P99.9 tail latency profiling.
 
+**A real `perf` flame graph from the EC2 benchmark run:**
+
+<a href="https://www.speedscope.app/#profileURL=https://raw.githubusercontent.com/RyanJHamby/order-book-engine/main/orderbook-engine/profiles/orderbook_ec2.perf_script.txt&title=orderbook_ec2">
+  <img src="profiles/orderbook_ec2_speedscope.png" width="800">
+</a>
+
+[Explore it interactively](https://www.speedscope.app/#profileURL=https://raw.githubusercontent.com/RyanJHamby/order-book-engine/main/orderbook-engine/profiles/orderbook_ec2.perf_script.txt&title=orderbook_ec2) (zoom, search, sandwich view). See [Flame graphs](#flame-graphs) below for what it shows.
+
 ## Performance
 
 Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills). Pool allocation + matching in the timed loop.
