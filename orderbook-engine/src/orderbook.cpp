@@ -119,3 +119,23 @@ std::size_t OrderBook::ask_count() const {
     for (const auto& [price, queue] : asks_) count += queue.size();
     return count;
 }
+
+std::map<double, std::uint32_t, std::greater<double>> OrderBook::bid_book_snapshot() const {
+    std::map<double, std::uint32_t, std::greater<double>> snapshot;
+    for (const auto& [price, queue] : bids_) {
+        std::uint32_t qty = 0;
+        for (const auto& o : queue) qty += o.quantity;
+        snapshot[price] = qty;
+    }
+    return snapshot;
+}
+
+std::map<double, std::uint32_t> OrderBook::ask_book_snapshot() const {
+    std::map<double, std::uint32_t> snapshot;
+    for (const auto& [price, queue] : asks_) {
+        std::uint32_t qty = 0;
+        for (const auto& o : queue) qty += o.quantity;
+        snapshot[price] = qty;
+    }
+    return snapshot;
+}

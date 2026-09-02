@@ -41,6 +41,35 @@ runs (`benchmark_results_*.txt` in the S3 bucket), not a single sample.
 known limitation of `c6i.large`'s virtualization layer not exposing PMU
 counters to the guest, not a script bug.
 
+### Baseline comparison
+
+The lock-free SPSC queue is only worth its design complexity if it's
+actually faster than the obvious alternative. `latency_benchmark`'s third
+section re-runs the identical producer/consumer pipeline (same pool, same
+`OrderBook`, same order generation) with only the queue swapped for
+`std::mutex` + `std::queue` + `std::condition_variable`, and reports a real
+measured speedup instead of an assumed one — same discipline as the
+baseline/optimized comparisons in `measured-speedup-harness`.
+
+| | Apple Silicon (local, informal) | EC2 `c6i.large` |
+|---|---|---|
+| Lock-free SPSC | 2.26M orders/sec | *pending — re-run `scripts/run_benchmark.sh`* |
+| mutex+queue | 2.17M orders/sec | *pending* |
+| Speedup | **1.04x** | *pending* |
+
+That's a genuinely small number, and it's reported as measured rather than
+reframed to look better — Amdahl's Law in action. `OrderBook::add_order`
+(the `std::map` red-black-tree rebalancing the flame graph already
+identifies as the dominant cost) takes roughly the same time regardless of
+which queue feeds it, so the queue's contribution to *this* workload's
+end-to-end throughput is small even though it's wait-free in isolation. The
+lock-free queue's real value proposition here is bounded tail latency under
+contention (proven race-free under TSan — see above), not raw throughput on
+a 2-thread, single-producer pipeline; a multi-producer or higher-contention
+scenario would likely show a larger gap. TSan run separately shows the same
+pattern (1.33x) at a much lower absolute scale, consistent with a real if
+modest effect rather than noise.
+
 ## Architecture
 
 ```
@@ -116,7 +145,7 @@ make -j$(nproc)
 
 ## Testing
 
-51 unit tests across 8 test suites:
+52 unit tests across 9 test suites:
 
 | Suite | Tests | Coverage |
 |-------|-------|----------|
@@ -128,10 +157,33 @@ make -j$(nproc)
 | PerformanceTest | 5 | Throughput and latency thresholds |
 | EdgeCaseTest | 13 | Extreme values, zero qty, cancel semantics |
 | ConcurrencyTest | 5 | SPSC producer-consumer, multi-queue fan-in, pipeline |
+| DifferentialTest | 1 | 200 randomized seeds × 300 ops each, cross-checked against a naive O(n) reference engine — see below |
 
 ```bash
 ./scripts/run_tests.sh
 ```
+
+### Differential testing
+
+`DifferentialTest` cross-checks the optimized `OrderBook` against
+`NaiveOrderBook` (`tests/naive_orderbook.hpp`) — a deliberately naive,
+obviously-correct O(n) reference matcher that never gets used in
+production or benchmarked. For 200 randomized seeds, 300 random add/cancel
+operations are generated per seed and applied to both engines; fills,
+resting book state, and cancel results are asserted equal after *every
+single operation*, not just at the end of a run.
+
+This catches a class of bug hand-written unit tests structurally can't:
+during development, an early version of this test used continuous
+`std::uniform_real_distribution<double>` prices, so two orders essentially
+never landed on the exact same price — same-price FIFO tie-breaking was
+never actually exercised, and a deliberately-injected bug (matching
+`ask_queue.back()` instead of `.front()`) passed silently. Switching to a
+discrete 10-tick price ladder (so same-price collisions actually happen
+across 300 ops) caught it immediately. The lesson generalizes: a
+differential test is only as strong as its input distribution's coverage
+of the state space, and it's worth periodically asking whether yours
+actually is.
 
 ### ThreadSanitizer
 
@@ -214,7 +266,7 @@ orderbook-engine/
 │   └── orderbook.cpp        # Matching engine implementation
 ├── benchmarks/
 │   └── latency_test.cpp     # 1M-order benchmark with percentiles
-├── tests/                   # 51 Google Test cases (8 suites)
+├── tests/                   # 52 Google Test cases (9 suites), incl. differential test
 ├── scripts/
 │   ├── aws_cloud_init.sh    # One-time AWS infrastructure setup
 │   ├── run_benchmark.sh     # EC2 Spot instance launcher

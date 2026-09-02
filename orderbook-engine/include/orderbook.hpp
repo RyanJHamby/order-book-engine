@@ -30,6 +30,12 @@ public:
     std::size_t bid_levels() const { return bids_.size(); }
     std::size_t ask_levels() const { return asks_.size(); }
 
+    // Aggregated price -> resting quantity, for differential testing against
+    // a reference implementation (see tests/test_differential.cpp). Not used
+    // on the hot path.
+    std::map<double, std::uint32_t, std::greater<double>> bid_book_snapshot() const;
+    std::map<double, std::uint32_t> ask_book_snapshot() const;
+
 private:
     // Price levels: bids highest-first, asks lowest-first.
     std::map<double, std::deque<Order>, std::greater<double>> bids_;

@@ -13,6 +13,7 @@ set(TEST_SOURCES
     test_performance.cpp
     test_edge_cases.cpp
     test_concurrency.cpp
+    test_differential.cpp
 )
 
 add_executable(orderbook_tests ${TEST_SOURCES})

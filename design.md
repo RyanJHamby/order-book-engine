@@ -258,6 +258,25 @@ LockFreeQueue<Order, 65536> queue;
 
 Measures end-to-end including cross-thread communication overhead. ~2.5–2.7M orders/sec on Apple Silicon, ~1.42–1.80M orders/sec on isolated EC2 `c6i.large` — see the Performance section above.
 
+### Benchmark 3: Baseline Comparison
+
+```cpp
+// Identical producer/consumer pipeline to Benchmark 2 -- same pool, same
+// OrderBook, same order generation -- with only the queue swapped for
+// std::mutex + std::queue + std::condition_variable.
+```
+
+Isolates the one variable that matters: does the lock-free queue actually
+beat the obvious alternative? Measured (Apple Silicon, informal): lock-free
+SPSC 2.26M orders/sec vs. mutex+queue 2.17M orders/sec — a 1.04x speedup.
+Small, and reported as measured rather than reframed: `OrderBook::add_order`
+(`std::map` rebalancing, confirmed dominant cost by the EC2 flame graph)
+takes roughly the same time regardless of which queue feeds it, so the
+queue's contribution to this specific workload's end-to-end throughput is
+limited even though it's wait-free in isolation. See the main README's
+Performance section for the full discussion, including the TSan-instrumented
+run showing the same pattern (1.33x) at lower absolute scale.
+
 ### Percentile Calculation
 
 ```cpp
@@ -336,7 +355,7 @@ kernel in the repo; a given AMI is pinned to whatever it shipped with).
 
 ## Testing
 
-51 unit tests across 8 test suites using Google Test:
+52 unit tests across 9 test suites using Google Test:
 
 | Suite | Tests | Coverage |
 |-------|-------|----------|
@@ -348,8 +367,31 @@ kernel in the repo; a given AMI is pinned to whatever it shipped with).
 | PerformanceTest | 5 | Matching throughput, queue throughput, pool allocation speed, latency thresholds |
 | EdgeCaseTest | 13 | Max uint64 IDs, extreme doubles, zero quantity, negative price, cancel-after-fill |
 | ConcurrencyTest | 5 | SPSC producer-consumer, multi-queue fan-in, thread-local pool isolation, full pipeline |
+| DifferentialTest | 1 | 200 randomized seeds × 300 ops, cross-checked against `NaiveOrderBook` |
 
 Tests override `-fno-exceptions -fno-rtti` with `-fexceptions -frtti` since Google Test requires both.
+
+### Differential testing
+
+Hand-written unit tests only prove the engine handles cases someone
+thought to write down. `DifferentialTest` (`tests/test_differential.cpp`)
+proves something stronger: `OrderBook` and `NaiveOrderBook`
+(`tests/naive_orderbook.hpp`, a deliberately naive O(n) reference matcher
+never used in production) independently implement the same
+price-time-priority spec and agree on every randomized add/cancel sequence
+across 200 seeds × 300 ops, checked after *every* operation — fills,
+resting book state (via `bid_book_snapshot()`/`ask_book_snapshot()`), and
+cancel results.
+
+This surfaced a real gap in the test itself during development: an early
+version generated prices via continuous `std::uniform_real_distribution
+<double>`, so two orders essentially never landed on the exact same price
+— same-price FIFO tie-breaking was never exercised, and a
+deliberately-injected bug (`ask_queue.back()` instead of `.front()`) passed
+silently. A discrete 10-tick price ladder, chosen so same-price collisions
+actually happen across 300 ops, catches it immediately. A differential
+test's power is bounded by its input distribution's coverage of the state
+space, not just by having one at all.
 
 ### ThreadSanitizer
 
@@ -403,7 +445,8 @@ Ranked by impact, with mitigations applied:
 | `src/order.cpp` | Order translation unit |
 | `src/main.cpp` | Demo: pool → queue → match pipeline |
 | `benchmarks/latency_test.cpp` | 1M-order latency + pipeline benchmark |
-| `tests/` | 51 unit tests across 8 suites |
+| `tests/` | 52 unit tests across 9 suites |
+| `tests/naive_orderbook.hpp` | O(n) reference matcher, differential-testing oracle only |
 | `scripts/aws_cloud_init.sh` | AWS infrastructure setup |
 | `scripts/run_benchmark.sh` | EC2 spot instance launcher |
 | `scripts/cloud_init.sh` | Instance bootstrap + benchmark + perf capture + S3 upload |
