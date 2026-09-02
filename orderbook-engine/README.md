@@ -6,13 +6,13 @@ A high-performance C++ order matching engine built for sub-microsecond latency. 
 
 Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills). Pool allocation + matching in the timed loop.
 
-| Metric | Apple Silicon (local, `scripts/run_benchmark.sh` not run here) | EC2 `c6i.large` (Intel Xeon Ice Lake, real target hardware) |
+| Metric | Apple Silicon (local, informal) | EC2 `c6i.large` (Intel Xeon Ice Lake, isolated core, 3 runs) |
 |--------|---|---|
-| P50 latency | 0.21 us | *pending — run `scripts/run_benchmark.sh`* |
-| P95 latency | 1.5 us | *pending* |
-| P99 latency | 2.6 us | *pending* |
-| P99.9 latency | 4.7–5.2 us | *pending* |
-| Pipeline throughput | 2.5–2.7M orders/sec | *pending* |
+| P50 latency | 0.21 us | 0.208–0.214 us |
+| P95 latency | 1.5 us | 1.26–1.32 us |
+| P99 latency | 2.6 us | 1.95–2.07 us |
+| P99.9 latency | 4.7–5.2 us | 3.09–3.23 us |
+| Pipeline throughput | 2.5–2.7M orders/sec | 1.42–1.80M orders/sec |
 
 Apple Silicon numbers come from an interactive local dev machine — not a
 representative, isolated benchmark environment (no CPU pinning, no turbo/governor
@@ -20,9 +20,18 @@ control, shared with everything else running on the laptop). They're useful as a
 sanity check while iterating, but the **EC2 numbers are the ones that should be
 cited** anywhere these results are referenced (resume, portfolio, etc.):
 `cloud_init.sh` pins the benchmark to an isolated core (`taskset -c 1`), disables
-turbo boost, and sets the CPU governor to `performance` for reproducibility —
-none of which is possible or meaningful on a laptop. Run `scripts/run_benchmark.sh`
-to populate the EC2 column with real numbers before citing them anywhere.
+turbo boost, and sets the CPU governor to `performance` for reproducibility, none
+of which is possible or meaningful on a laptop. EC2 latency percentiles are
+consistently *better* than the Apple Silicon numbers (tighter isolation wins out
+despite lower single-core clock), but EC2 throughput is consistently *lower*
+(1.4–1.8M vs 2.5–2.7M orders/sec) — a `c6i.large` has only 2 vCPUs, and the flame
+graph below points at real time in `std::map`'s red-black tree rebalancing inside
+`OrderBook::add_order`, not scheduler noise. Ranges reflect 3 separate on-demand
+runs (`benchmark_results_*.txt` in the S3 bucket), not a single sample.
+
+`perf stat` hardware counters report `<not supported>` on this instance — a
+known limitation of `c6i.large`'s virtualization layer not exposing PMU
+counters to the guest, not a script bug.
 
 ## Architecture
 
@@ -164,6 +173,23 @@ output — drag it into [speedscope.app](https://www.speedscope.app/) directly
 importer reads it as-is). This only works from the EC2 run: `perf` is
 Linux-only, and macOS has no equivalent that produces this format — flame
 graphs for this project are EC2-only, not something to attempt locally.
+
+Captured samples land inside `OrderBook::add_order` → `std::map<double,
+std::deque<Order>>::operator[]` → `_Rb_tree_insert_and_rebalance` — the
+price-level map's red-black tree insertion is real, visible cost, alongside
+some `do_anonymous_page` kernel time from first-touch page faults on the
+order pool. This is why pipeline throughput (1.4–1.8M orders/sec) trails the
+isolated per-op latency numbers: the tree rebalancing cost only shows up
+under sustained load, not in a single `add_order` call.
+
+One gotcha worth knowing if you re-run `cloud_init.sh` on a newer/older
+Ubuntu 22.04 AMI: `apt`'s `linux-tools-aws` package version and the AMI's
+actual booted kernel version can drift (apt tracks the latest kernel in the
+repo; a given AMI is pinned to whatever it shipped with). The script
+resolves and calls the real `perf` binary directly under
+`/usr/lib/linux-tools/<version>/perf` rather than going through the
+`perf` wrapper on `PATH`, which refuses to run on any version mismatch even
+though the underlying `perf_event` syscall ABI works fine across the gap.
 
 ## Project Structure
 

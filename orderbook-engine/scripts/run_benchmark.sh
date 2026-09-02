@@ -52,9 +52,12 @@ if [ ! -f "$KEY_NAME.pem" ]; then
     exit 1
 fi
 
-# 4. Launch spot instance.
+# 4. Launch spot instance, falling back to on-demand if Spot capacity is
+#    unavailable (common for c6i.large depending on region/AZ conditions).
 echo "Requesting spot instance ($INSTANCE_TYPE)..."
-INSTANCE_ID=$(aws ec2 run-instances \
+LAUNCH_MODE="spot"
+set +e
+RUN_OUTPUT=$(aws ec2 run-instances \
     --image-id "$AMI_ID" \
     --instance-type "$INSTANCE_TYPE" \
     --key-name "$KEY_NAME" \
@@ -65,9 +68,32 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --region "$REGION" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=orderbook-benchmark}]" \
     --query 'Instances[0].InstanceId' \
-    --output text)
+    --output text 2>&1)
+RUN_STATUS=$?
+set -e
 
-echo "Instance: $INSTANCE_ID"
+if [ $RUN_STATUS -ne 0 ]; then
+    echo "Spot launch failed:"
+    echo "$RUN_OUTPUT"
+    echo "Falling back to on-demand ($INSTANCE_TYPE)..."
+    LAUNCH_MODE="on-demand"
+    INSTANCE_ID=$(aws ec2 run-instances \
+        --image-id "$AMI_ID" \
+        --instance-type "$INSTANCE_TYPE" \
+        --key-name "$KEY_NAME" \
+        --security-group-ids "$SG_ID" \
+        --instance-initiated-shutdown-behavior terminate \
+        --iam-instance-profile Name=orderbook-benchmark-role \
+        --user-data "file://$SCRIPT_DIR/cloud_init.sh" \
+        --region "$REGION" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=orderbook-benchmark}]" \
+        --query 'Instances[0].InstanceId' \
+        --output text)
+else
+    INSTANCE_ID="$RUN_OUTPUT"
+fi
+
+echo "Instance: $INSTANCE_ID ($LAUNCH_MODE)"
 
 # 5. Wait for running state.
 echo "Waiting for instance to start..."
@@ -80,20 +106,24 @@ PUBLIC_IP=$(aws ec2 describe-instances \
     --output text)
 echo "Running at: $PUBLIC_IP"
 
-# 6. Fetch spot price for cost reporting.
-SPOT_PRICE=$(aws ec2 describe-spot-price-history \
-    --instance-types "$INSTANCE_TYPE" \
-    --product-descriptions "Linux/UNIX" \
-    --region "$REGION" \
-    --max-items 1 \
-    --query 'SpotPriceHistory[0].SpotPrice' \
-    --output text 2>/dev/null || echo "unknown")
-
+# 6. Cost reporting.
 ON_DEMAND_PRICE="0.085"  # c6i.large us-east-1 on-demand
-echo "Spot price: \$$SPOT_PRICE/hr (on-demand: \$$ON_DEMAND_PRICE/hr)"
-if [ "$SPOT_PRICE" != "unknown" ]; then
-    SAVINGS=$(echo "scale=0; (1 - $SPOT_PRICE / $ON_DEMAND_PRICE) * 100" | bc 2>/dev/null || echo "?")
-    echo "Savings:    ${SAVINGS}% vs on-demand"
+if [ "$LAUNCH_MODE" == "spot" ]; then
+    SPOT_PRICE=$(aws ec2 describe-spot-price-history \
+        --instance-types "$INSTANCE_TYPE" \
+        --product-descriptions "Linux/UNIX" \
+        --region "$REGION" \
+        --max-items 1 \
+        --query 'SpotPriceHistory[0].SpotPrice' \
+        --output text 2>/dev/null || echo "unknown")
+
+    echo "Spot price: \$$SPOT_PRICE/hr (on-demand: \$$ON_DEMAND_PRICE/hr)"
+    if [ "$SPOT_PRICE" != "unknown" ]; then
+        SAVINGS=$(echo "scale=0; (1 - $SPOT_PRICE / $ON_DEMAND_PRICE) * 100" | bc 2>/dev/null || echo "?")
+        echo "Savings:    ${SAVINGS}% vs on-demand"
+    fi
+else
+    echo "On-demand price: \$$ON_DEMAND_PRICE/hr (no Spot capacity was available; run should take a few minutes)"
 fi
 
 # 7. Wait for cloud-init to finish (instance self-terminates).
