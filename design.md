@@ -6,17 +6,17 @@ A high-performance C++20 order matching engine built for sub-microsecond latency
 
 ### Performance
 
-Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills):
+Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills). Pool allocation + matching in the timed loop.
 
-| Metric | Value |
-|--------|-------|
-| P50 latency | 0.21 μs |
-| P95 latency | 1.5 μs |
-| P99 latency | 2.6 μs |
-| P99.9 latency | 5.7 μs |
-| Pipeline throughput | 2.4M orders/sec |
+| Metric | Apple Silicon (local, informal) | EC2 `c6i.large` (isolated core, 3 runs) |
+|--------|---|---|
+| P50 latency | 0.21 μs | 0.208–0.214 μs |
+| P95 latency | 1.5 μs | 1.26–1.32 μs |
+| P99 latency | 2.6 μs | 1.95–2.07 μs |
+| P99.9 latency | 4.7–5.2 μs | 3.09–3.23 μs |
+| Pipeline throughput | 2.5–2.7M orders/sec | 1.42–1.80M orders/sec |
 
-Measured with pool allocation + matching in the timed loop. Numbers from local Apple Silicon; EC2 `c6i.large` (Intel Xeon Ice Lake) numbers via `scripts/run_benchmark.sh`.
+EC2 numbers are the ones to cite — isolated core (`taskset`), no turbo, `performance` governor. See the main README's Performance section for why EC2 throughput trails Apple Silicon despite better latency percentiles (2 vCPUs, real `std::map` rebalancing cost visible in the flame graph under sustained load).
 
 ---
 
@@ -220,6 +220,12 @@ The `order_index_` unordered map provides O(1) lookup by ID, avoiding a linear s
 
 **Why LTO is critical:** Without LTO, the matching engine loop in `orderbook.cpp` cannot be inlined into the benchmark loop in `latency_test.cpp`. They're separate translation units. LTO enables the compiler to see across `.o` files and flatten the call stack, eliminating function call overhead in the timed hot path.
 
+Two CMake options trade these release flags for instrumentation when needed:
+`ENABLE_TSAN` swaps them for `-fsanitize=thread -O1 -g -fno-omit-frame-pointer`
+(no LTO — TSan needs accurate stacks); `ENABLE_PROFILING` keeps the release
+flags but adds `-g -fno-omit-frame-pointer` so `perf` can symbolize an
+otherwise-optimized binary.
+
 ---
 
 ## Benchmark Methodology
@@ -250,7 +256,7 @@ LockFreeQueue<Order, 65536> queue;
 // Measure: wall clock / orders consumed = per-order latency
 ```
 
-Measures end-to-end including cross-thread communication overhead. Typical result: ~2.4M orders/sec.
+Measures end-to-end including cross-thread communication overhead. ~2.5–2.7M orders/sec on Apple Silicon, ~1.42–1.80M orders/sec on isolated EC2 `c6i.large` — see the Performance section above.
 
 ### Percentile Calculation
 
@@ -281,11 +287,16 @@ Automated benchmarking on `c6i.large` (Intel Xeon Ice Lake, 2 vCPU) with CPU iso
 
 ```
 aws_cloud_init.sh     → One-time: create VPC, security group, key pair, IAM role
-run_benchmark.sh      → Launch c6i.large spot instance with cloud_init.sh as user data
-cloud_init.sh         → Install deps, build, run tests, run benchmark, upload to S3, self-terminate
+run_benchmark.sh      → Launch c6i.large spot instance (falls back to on-demand if
+                         Spot capacity is unavailable) with cloud_init.sh as user data
+cloud_init.sh         → Install deps, build (-DENABLE_PROFILING=ON), run tests,
+                         run benchmark, perf stat, perf record (flame graph),
+                         upload to S3, self-terminate
 ```
 
-The instance self-terminates after uploading results to S3, minimizing cost. Spot pricing typically provides ~70% discount vs on-demand.
+The instance self-terminates after uploading results to S3 (a trap on EXIT
+handles this on any exit path, not just the happy path), minimizing cost.
+Spot pricing typically provides ~70% discount vs on-demand when available.
 
 ### Hardware counters captured
 
@@ -295,6 +306,31 @@ instructions, cycles              → IPC (instructions per cycle)
 L1-dcache-load-misses            → L1 data cache behavior
 branch-misses                     → Branch prediction accuracy
 ```
+
+In practice, on `c6i.large` these all report `<not supported>` — the
+instance's virtualization layer doesn't expose PMU counters to the guest.
+This is a platform limitation, not a script bug; verified across every run.
+
+### Flame graphs
+
+`perf record -F 999 -g --call-graph dwarf` captures a symbolized profile of
+the benchmark (`-DENABLE_PROFILING=ON` keeps the release optimization level
+but adds `-g -fno-omit-frame-pointer`), converted to raw `perf script` text
+and uploaded to S3. A committed capture and interactive
+[speedscope.app](https://www.speedscope.app/) link live in
+`orderbook-engine/profiles/` — see the screenshot at the top of the main
+README. Samples land inside `OrderBook::add_order` → `std::map::operator[]`
+→ `_Rb_tree_insert_and_rebalance`, i.e. real cost in the price-level map's
+red-black tree, not scheduler noise — this is why pipeline throughput
+trails the isolated per-op latency numbers under sustained load.
+
+`perf` on `PATH` is a version-checking wrapper that refuses to run if the
+installed `linux-tools` package version doesn't exactly match the running
+kernel — which drifts routinely on EC2 Ubuntu AMIs (apt tracks the latest
+kernel in the repo; a given AMI is pinned to whatever it shipped with).
+`cloud_init.sh` resolves and calls the real binary under
+`/usr/lib/linux-tools/<version>/perf` directly, since the underlying
+`perf_event` syscall ABI tolerates the version skew fine.
 
 ---
 
@@ -314,6 +350,18 @@ branch-misses                     → Branch prediction accuracy
 | ConcurrencyTest | 5 | SPSC producer-consumer, multi-queue fan-in, thread-local pool isolation, full pipeline |
 
 Tests override `-fno-exceptions -fno-rtti` with `-fexceptions -frtti` since Google Test requires both.
+
+### ThreadSanitizer
+
+`ENABLE_TSAN` builds with `-fsanitize=thread -O1 -g -fno-omit-frame-pointer`
+instead of the release flags (TSan wants no LTO for accurate, symbolized
+stacks) and runs the full suite through it — all 51 tests, including the
+5 `ConcurrencyTest` cases exercising the SPSC queue, pass with zero races
+reported. On macOS, Apple Clang's bundled TSan runtime crashes at startup
+against recent dyld shared-cache formats (macOS 26+); `scripts/run_tsan.sh`
+detects this and falls back to Homebrew LLVM automatically. TSan throughput
+numbers run ~5–10x slower than native and aren't representative of real
+performance.
 
 ---
 
@@ -339,7 +387,7 @@ Ranked by impact, with mitigations applied:
 
 **Multiple products:** One OrderBook instance per product (e.g., one for ES, one for NQ). Each runs on its own matching thread. This is how real exchanges scale — per-product matching threads, not shared-state concurrency.
 
-**Bottleneck at scale:** At very high throughput, the `std::map` price level lookup (O(log P)) becomes the bottleneck, not the queue or allocator. For production HFT, price levels could be replaced with a fixed-size array indexed by price tick (O(1) lookup) if the price range is bounded.
+**Bottleneck at scale:** At very high throughput, the `std::map` price level lookup (O(log P)) becomes the bottleneck, not the queue or allocator. For production HFT, price levels could be replaced with a fixed-size array indexed by price tick (O(1) lookup) if the price range is bounded. Confirmed empirically, not just theoretically — the EC2 flame graph (`orderbook-engine/profiles/`) shows real sampled time in `std::map::operator[]` → `_Rb_tree_insert_and_rebalance` inside `OrderBook::add_order` under sustained load.
 
 ---
 
@@ -358,5 +406,7 @@ Ranked by impact, with mitigations applied:
 | `tests/` | 51 unit tests across 8 suites |
 | `scripts/aws_cloud_init.sh` | AWS infrastructure setup |
 | `scripts/run_benchmark.sh` | EC2 spot instance launcher |
-| `scripts/cloud_init.sh` | Instance bootstrap + benchmark + S3 upload |
-| `CMakeLists.txt` | Build configuration with HFT compiler flags |
+| `scripts/cloud_init.sh` | Instance bootstrap + benchmark + perf capture + S3 upload |
+| `scripts/run_tsan.sh` | ThreadSanitizer build + test run (macOS: Homebrew LLVM fallback) |
+| `profiles/` | Committed EC2 perf capture + speedscope screenshot |
+| `CMakeLists.txt` | Build configuration with HFT compiler flags, `ENABLE_TSAN`, `ENABLE_PROFILING` |

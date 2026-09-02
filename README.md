@@ -7,19 +7,44 @@
 
 A high-performance C++ order matching engine built for sub-microsecond latency. Implements continuous price-time priority matching with lock-free order ingestion, thread-local memory pools, and automated EC2 Spot benchmarking with P99.9 tail latency profiling.
 
+**A real `perf` flame graph from the EC2 benchmark run:**
+
+<a href="https://www.speedscope.app/#profileURL=https://raw.githubusercontent.com/RyanJHamby/order-book-engine/main/orderbook-engine/profiles/orderbook_ec2.perf_script.txt&title=orderbook_ec2">
+  <img src="orderbook-engine/profiles/orderbook_ec2_speedscope.png" width="800">
+</a>
+
+[Explore it interactively](https://www.speedscope.app/#profileURL=https://raw.githubusercontent.com/RyanJHamby/order-book-engine/main/orderbook-engine/profiles/orderbook_ec2.perf_script.txt&title=orderbook_ec2) (zoom, search, sandwich view). See [Flame graphs](#flame-graphs) below for what it shows.
+
 ## Performance
 
-Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills):
+Benchmarked with 1,000,000 orders (alternating buy/sell, random prices, real matching with 773K fills). Pool allocation + matching in the timed loop.
 
-| Metric | Value |
-|--------|-------|
-| P50 latency | 0.21 us |
-| P95 latency | 1.5 us |
-| P99 latency | 2.6 us |
-| P99.9 latency | 5.7 us |
-| Pipeline throughput | 2.4M orders/sec |
+| Metric | Apple Silicon (local, informal) | EC2 `c6i.large` (Intel Xeon Ice Lake, isolated core, 3 runs) |
+|--------|---|---|
+| P50 latency | 0.21 us | 0.208–0.214 us |
+| P95 latency | 1.5 us | 1.26–1.32 us |
+| P99 latency | 2.6 us | 1.95–2.07 us |
+| P99.9 latency | 4.7–5.2 us | 3.09–3.23 us |
+| Pipeline throughput | 2.5–2.7M orders/sec | 1.42–1.80M orders/sec |
 
-*Measured with pool allocation + matching in the timed loop. Numbers from local Apple Silicon; EC2 `c6i.large` (Intel Xeon Ice Lake) numbers via `scripts/run_benchmark.sh`.*
+Apple Silicon numbers come from an interactive local dev machine — not a
+representative, isolated benchmark environment (no CPU pinning, no turbo/governor
+control, shared with everything else running on the laptop). They're useful as a
+sanity check while iterating, but the **EC2 numbers are the ones that should be
+cited** anywhere these results are referenced (resume, portfolio, etc.):
+`cloud_init.sh` pins the benchmark to an isolated core (`taskset -c 1`), disables
+turbo boost, and sets the CPU governor to `performance` for reproducibility, none
+of which is possible or meaningful on a laptop. EC2 latency percentiles are
+consistently *better* than the Apple Silicon numbers (tighter isolation wins out
+despite lower single-core clock), but EC2 throughput is consistently *lower*
+(1.4–1.8M vs 2.5–2.7M orders/sec) — a `c6i.large` has only 2 vCPUs, and the flame
+graph below points at real time in `std::map`'s red-black tree rebalancing inside
+`OrderBook::add_order`, not scheduler noise. Ranges reflect 3 separate on-demand
+runs (`benchmark_results_*.txt` in the S3 bucket), not a single sample.
+
+`perf stat` hardware counters report `<not supported>` on this instance — a
+known limitation of `c6i.large`'s virtualization layer not exposing PMU
+counters to the guest, not a script bug.
 
 ## Architecture
 
@@ -79,6 +104,9 @@ Lock-free queues eliminate mutex contention at the ingestion boundary. The match
 
 **Prerequisites:** C++20 compiler, CMake 3.20+, Google Test
 
+All commands below are run from `orderbook-engine/` — `cd` there first and
+stay there for the rest of this README.
+
 ```bash
 cd orderbook-engine
 ./scripts/build_and_run_benchmark.sh
@@ -113,6 +141,23 @@ make -j$(nproc)
 ./scripts/run_tests.sh
 ```
 
+### ThreadSanitizer
+
+The concurrency guarantees (`ConcurrencyTest`, the SPSC queue in
+`order_queue.hpp`) are validated under ThreadSanitizer:
+
+```bash
+./scripts/run_tsan.sh
+```
+
+Builds a separate `build-tsan/` tree with `-DENABLE_TSAN=ON` (`-fsanitize=thread
+-O1 -g`, no `-march=native`/`-flto`) and runs the full test suite plus the
+latency benchmark through it. On macOS, Apple Clang's bundled TSan runtime
+crashes at startup on recent OS versions (dyld shared cache format changed);
+the script auto-detects and uses Homebrew LLVM (`brew install llvm`) instead
+if present. TSan throughput numbers are ~5-10x slower than native and are not
+representative — use `scripts/run_benchmark.sh` for real performance numbers.
+
 ## EC2 Spot Benchmarking
 
 Automated profiling on `c6i.large` (Intel Xeon Ice Lake) Spot instances:
@@ -128,11 +173,42 @@ Automated profiling on `c6i.large` (Intel Xeon Ice Lake) Spot instances:
 The cloud-init script:
 - Disables turbo boost and sets the CPU governor to `performance` for stable measurements
 - Pins the benchmark to a single core via `taskset` to avoid scheduler jitter
+- Builds with `-DENABLE_PROFILING=ON` (keeps `-O3`/LTO, adds `-g -fno-omit-frame-pointer` for symbolized profiling)
 - Runs `perf stat` for hardware counters (cache misses, IPC, branch mispredicts)
+- Runs `perf record -g --call-graph dwarf` for a flame graph, converts to `perf script` text via `perf_script.txt`
 - Captures system info (CPU model, AVX2 flags, kernel version)
 - Uploads results to S3 with timestamps
+- Falls back to on-demand pricing automatically if Spot capacity is unavailable
 
 Spot instances run at ~70% discount vs. on-demand. The script reports the exact savings percentage.
+
+### Flame graphs
+
+`perf_script_<timestamp>.txt` in the uploaded results is raw `perf script`
+output — drag it into [speedscope.app](https://www.speedscope.app/) directly
+(no FlameGraph.pl / SVG conversion step needed; speedscope's linux-perf
+importer reads it as-is). This only works from the EC2 run: `perf` is
+Linux-only, and macOS has no equivalent that produces this format — flame
+graphs for this project are EC2-only, not something to attempt locally.
+`orderbook-engine/profiles/` has a committed capture and a live
+`speedscope.app` link — see the screenshot at the top of this README.
+
+Captured samples land inside `OrderBook::add_order` → `std::map<double,
+std::deque<Order>>::operator[]` → `_Rb_tree_insert_and_rebalance` — the
+price-level map's red-black tree insertion is real, visible cost, alongside
+some `do_anonymous_page` kernel time from first-touch page faults on the
+order pool. This is why pipeline throughput (1.4–1.8M orders/sec) trails the
+isolated per-op latency numbers: the tree rebalancing cost only shows up
+under sustained load, not in a single `add_order` call.
+
+One gotcha worth knowing if you re-run `cloud_init.sh` on a newer/older
+Ubuntu 22.04 AMI: `apt`'s `linux-tools-aws` package version and the AMI's
+actual booted kernel version can drift (apt tracks the latest kernel in the
+repo; a given AMI is pinned to whatever it shipped with). The script
+resolves and calls the real `perf` binary directly under
+`/usr/lib/linux-tools/<version>/perf` rather than going through the
+`perf` wrapper on `PATH`, which refuses to run on any version mismatch even
+though the underlying `perf_event` syscall ABI works fine across the gap.
 
 ## Project Structure
 
@@ -150,11 +226,13 @@ orderbook-engine/
 ├── benchmarks/
 │   └── latency_test.cpp     # 1M-order benchmark with percentiles
 ├── tests/                   # 51 Google Test cases (8 suites)
+├── profiles/                 # Committed perf capture + speedscope screenshot
 ├── scripts/
 │   ├── aws_cloud_init.sh    # One-time AWS infrastructure setup
-│   ├── run_benchmark.sh     # EC2 Spot instance launcher
-│   ├── cloud_init.sh        # EC2 instance bootstrap + benchmark
+│   ├── run_benchmark.sh     # EC2 Spot instance launcher (falls back to on-demand)
+│   ├── cloud_init.sh        # EC2 instance bootstrap + benchmark + perf capture
 │   ├── build_and_run_benchmark.sh  # Local build + benchmark
-│   └── run_tests.sh         # Unit test runner
+│   ├── run_tests.sh         # Unit test runner
+│   └── run_tsan.sh          # ThreadSanitizer build + test run
 └── CMakeLists.txt           # Build configuration
 ```
