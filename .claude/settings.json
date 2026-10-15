@@ -69,6 +69,7 @@
       "mcp__plugin_*"
     ],
     "allow": [
+      "Bash(./build/tests/orderbook_tests:*)",
       "Bash(cmake:*)",
       "Bash(ctest:*)",
       "Bash(gh issue comment:*)",

@@ -84,7 +84,7 @@ jobs:
             --model ${{ inputs.model }}
             --effort ${{ inputs.effort }}
             --max-turns ${{ inputs.max_turns }}
-            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git add:*),mcp__github_file_ops__commit_files,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(cmake:*),Bash(ctest:*),Bash(make:*)"
+            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(git add:*),mcp__github_file_ops__commit_files,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(cmake:*),Bash(ctest:*),Bash(make:*),Bash(./build/tests/orderbook_tests:*)"
             --disallowedTools "mcp__claude_ai_*,mcp__plugin_*,mcp__github_comment__*,mcp__github_ci__*,mcp__github_inline_comment__*,WebSearch,Bash(curl:*),Bash(wget:*),Bash(gh api:*),Bash(gh release:*),Bash(gh secret:*),Bash(gh variable:*),Bash(gh workflow:*),Bash(gh pr merge:*),Bash(git push --force:*),Bash(git push -f:*)"
 
       - name: remove empty agent branch
