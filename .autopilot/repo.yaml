@@ -1,0 +1,21 @@
+# Per-repo autopilot config. Owned by Ryan; agents cannot edit it (CODEOWNERS + guard + deny rules).
+# Edit from your phone in the GitHub mobile editor to change mode, tier or limits.
+tier: A              # A career-critical | B useful | C low
+mode: standard              # standard | yolo | dormant
+comms: none                 # fixed in v1; there is no code path that raises this
+
+# Commands agents may run (also the Bash allowlist). Add test/lint runners here.
+commands:
+  - "./build/tests/orderbook_tests"
+  - "cmake"
+  - "ctest"
+  - "make"
+
+guard:
+  max_diff_lines: 800
+  extra_protected: []
+  comms_allow: []           # path globs where messaging libs are legitimately part of the product
+
+# budget:                   # optional overrides of policy defaults
+#   runs_per_day: {A: 2, B: 1}
+#   max_turns: {standard: 25}

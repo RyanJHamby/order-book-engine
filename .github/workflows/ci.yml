@@ -1,0 +1,23 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: install toolchain
+        run: sudo apt-get update -q && sudo apt-get install -y -q cmake libgtest-dev
+      - name: configure
+        run: cmake -S orderbook-engine -B build -DCMAKE_BUILD_TYPE=Release
+      - name: build
+        run: cmake --build build -j"$(nproc)"
+      - name: test
+        run: ./build/tests/orderbook_tests

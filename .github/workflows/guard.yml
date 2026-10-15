@@ -1,0 +1,32 @@
+# autopilot-managed. Required status check "guard". Deterministic, zero tokens.
+name: guard
+
+on:
+  pull_request:
+  push:
+    branches: ["agent/**"]   # agent pushes use a token that does not fire pull_request CI; this satisfies required checks
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HEAD_REF: ${{ github.head_ref || github.ref_name }}
+      BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: pip install --quiet pyyaml
+      - name: run guard (base-branch copy, so a PR cannot weaken the guard that judges it)
+        run: |
+          AGENT=false
+          case "$HEAD_REF" in agent/*|claude/*) AGENT=true ;; esac
+          git show "origin/$BASE_REF:.autopilot/guard.py" > "$RUNNER_TEMP/guard.py" 2>/dev/null || {
+            echo "::warning::no guard on base branch yet (install PR); using head copy"; cp .autopilot/guard.py "$RUNNER_TEMP/guard.py"; }
+          git show "origin/$BASE_REF:.autopilot/repo.yaml" > "$RUNNER_TEMP/repo.yaml" 2>/dev/null || cp .autopilot/repo.yaml "$RUNNER_TEMP/repo.yaml"
+          python "$RUNNER_TEMP/guard.py" --base "origin/$BASE_REF" --head HEAD --agent "$AGENT" --config "$RUNNER_TEMP/repo.yaml"
