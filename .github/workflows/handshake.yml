@@ -1,0 +1,29 @@
+# autopilot-managed. Lints specs/*.md against the contract (deterministic, zero tokens).
+name: handshake
+
+on:
+  pull_request:
+    paths: ["specs/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  handshake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: pip install --quiet pyyaml
+      - name: lint specs (base-branch copy of the linter)
+        run: |
+          git show "origin/$BASE_REF:.autopilot/handshake.py" > "$RUNNER_TEMP/handshake.py" 2>/dev/null || cp .autopilot/handshake.py "$RUNNER_TEMP/handshake.py"
+          SPECS=$(ls specs/*.md 2>/dev/null | grep -v '/_' || true)
+          [ -n "$SPECS" ] || { echo "no specs"; exit 0; }
+          # REJECTED fails the check; NEEDS-WORK is reported but does not block (--warn-only)
+          python "$RUNNER_TEMP/handshake.py" $SPECS --config .autopilot/repo.yaml --warn-only

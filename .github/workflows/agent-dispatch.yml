@@ -1,0 +1,58 @@
+# autopilot-managed. Do not edit by hand: change the kit in ~/dev/autopilot and run `ap upgrade`.
+# Cheap front door: decides (zero tokens) whether an agent run may start, then fires agent-exec.yml.
+name: agent-dispatch
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "37 5 * * *"      # nightly, ~01:37 ET
+    - cron: "23 17 * * 1-5"   # weekday midday, ~13:23 ET (while you are at work)
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Issue number to run (blank = pick from agent-ready)"
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: autopilot-dispatch-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    # Only runs when the repo is enabled, not paused, and the actor is the repo owner (or cron).
+    if: >-
+      vars.AUTOPILOT_ENABLED == 'true' && vars.AUTOPILOT_PAUSED != 'true' &&
+      (github.event_name == 'schedule' || github.actor == github.repository_owner) &&
+      (github.event_name != 'issues' || github.event.label.name == 'agent-ready' || github.event.label.name == 'hard') &&
+      (github.event_name != 'issue_comment' || (!github.event.issue.pull_request && contains(github.event.comment.body, '@claude')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: write        # needed to fire agent-exec.yml
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_FROM_EVENT: ${{ github.event.issue.number }}
+      ISSUE_FROM_INPUT: ${{ inputs.issue }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: pip install --quiet pyyaml
+      - name: gate and dispatch
+        run: |
+          ISSUE="${ISSUE_FROM_INPUT:-$ISSUE_FROM_EVENT}"
+          case "$ISSUE" in
+            ""|*[!0-9]*) [ -z "$ISSUE" ] || { echo "::error::issue must be numeric"; exit 1; } ;;
+          esac
+          if [ -n "$ISSUE" ]; then
+            python .autopilot/gate.py dispatch --issue "$ISSUE"
+          else
+            python .autopilot/gate.py dispatch
+          fi
