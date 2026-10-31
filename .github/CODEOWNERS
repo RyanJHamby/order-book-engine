@@ -1,0 +1,8 @@
+# BEGIN autopilot (managed: protected paths)
+/.github/ @RyanJHamby
+/.autopilot/ @RyanJHamby
+/.claude/ @RyanJHamby
+/AGENTS.md @RyanJHamby
+/CLAUDE.md @RyanJHamby
+/.mcp.json @RyanJHamby
+# END autopilot

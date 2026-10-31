@@ -1,0 +1,26 @@
+{
+  "files": {
+    ".autopilot/CONSTITUTION.md": "26df1bee8840d76b9f0463f99d69ecc34bf4ba3467c19256c9802a6f9ce1a0b5",
+    ".autopilot/CONTRACT.md": "22b346bd562bb5190d00ff6566440a577cfeec2f78a0f043e1d1587115a3ad3f",
+    ".autopilot/gate.py": "ecc7d662afa3fa12c6aa4ad0055d2e93da9a6d29be9fd600785be4a62b8e98a2",
+    ".autopilot/guard.py": "1efaf99cadc88ab8a384a7d1b61b09d1d4f9cd322afb2383268a23a866d3049b",
+    ".autopilot/handshake.py": "84a9e37dd9d60624a9aefff1ff0fdbacfbf0fb0edefe8c4ad646ef721ab2aacc",
+    ".autopilot/merge-policy.yaml": "25cd0a0a3847523ba16a51a5655f2fe71f86fc1c416829d347f032ee91541fb9",
+    ".autopilot/repo.yaml": "a3b1cebfd27ad5bf2e207705068ece535389457452ca9fdcc041edb01efe353d",
+    ".autopilot/tier.py": "07d28886d4f8b785dc2d37dfaf3495f45205436317fe2dfae63fc8348eac72f4",
+    ".claude/agents/auditor.md": "24d0f543a886a773a6374ac80665015ca8d9b0c2015785407c0f56175754347e",
+    ".claude/agents/fixer.md": "3aa76c42071804e19966a40757298e8f22e58d62adfbc495042ae9eba4403d9f",
+    ".claude/agents/implementer.md": "93e1ee0d62317e169099a6ef151fc7cefb15ee2d11ada33aef7b5e2ffb5fea09",
+    ".claude/agents/reviewer.md": "b87d59f6e3d49ef01707f818f7deb67cd80371146d62af1abf3989e930bbdcbd",
+    ".claude/agents/triage.md": "56358627525211c4db2212d7faae64e8f32de0fa0e272fee221540a8411b4bd8",
+    ".claude/settings.json": "1152a01bef37af5357593170ab45b6ba07400a8c79da12d87f41560b7cfb76f7",
+    ".github/CODEOWNERS": "41f628f5ea7605deab59bfd70ac826d700d62733a9c78698fdfd788ccc24cfd3",
+    ".github/ISSUE_TEMPLATE/agent-task.md": "9c1d25f7995517b1f8286fa0d5342b873c2dbf94eef99eff22cb6100d92852e4",
+    ".github/pull_request_template.md": "6b1c5e0f7e6a2bb50068c4b710f147ec9f8a0d251eac53ad9619bfeefcfa1249",
+    ".github/workflows/agent-dispatch.yml": "6936259dbc1e4ea3ebb0681d62619f1f393a623d0a712e251c51c01c43062a87",
+    ".github/workflows/agent-exec.yml": "0ed00c856163298dd4d8f610fdb6add33bd2ae85f6d228c329e462fde46a9cf7",
+    ".github/workflows/guard.yml": "ceaaec949bb627dda712793c6d6b5ec21752563bfbad722a956040fc281d7e56",
+    ".github/workflows/handshake.yml": "445625f7de47a1812c373c72db8a8f6bfe641d76c0f4df0a802f4836ff1843bc"
+  },
+  "kit_version": "0.1.0"
+}

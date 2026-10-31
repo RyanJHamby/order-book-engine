@@ -1,0 +1,10 @@
+# Which kinds of PR may merge without your review. Owned by you; agents cannot edit it (.autopilot/ is protected).
+# Ships EMPTY: every PR waits for you. Add a class only when you trust it for this repo.
+#   docs-only        markdown and docs/ only
+#   tests-add-only   new test files or additive test edits (no removed lines, no skips)
+#   lockfile-patch   package-lock.json patch-version bumps only
+#   generated        files matching generated_globs
+# Any PR touching a protected path (workflows, .autopilot, .claude, migrations, billing...) is always yours.
+auto_merge_classes: []
+generated_globs: []
+protected_extra: []
