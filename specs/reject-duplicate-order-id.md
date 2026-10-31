@@ -17,7 +17,8 @@ non_goals:
 risk_tier: 2
 max_runs: 3
 autonomy: inherit
-status: draft
+status: ready
+issue: 6
 ---
 
 ## The gap (found by reading the tests and `src/orderbook.cpp`, then confirmed with a 10-line program)
@@ -51,3 +52,4 @@ dedicated target; do not fold the file into `orderbook_tests`.
 
 ## Log
 - 2026-10-30 draft (provisional handshake; repo not onboarded to autopilot yet)
+- 2026-10-31 ready, issue #6 (handshake was provisional; repo not yet onboarded with ap init; waiting for the owner's agent-ready label)

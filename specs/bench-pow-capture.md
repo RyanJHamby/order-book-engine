@@ -18,7 +18,8 @@ non_goals:
 risk_tier: 1
 max_runs: 3
 autonomy: inherit
-status: draft
+status: ready
+issue: 4
 ---
 
 ## Why
@@ -72,3 +73,4 @@ instances. The test requires the strings `capture_benchmark.sh` and `PMU`. Quote
 
 ## Log
 - 2026-10-30 draft (provisional handshake; repo not onboarded to autopilot yet)
+- 2026-10-31 ready, issue #4 (handshake was provisional; repo not yet onboarded with ap init; waiting for the owner's agent-ready label)
