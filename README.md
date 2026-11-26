@@ -311,3 +311,9 @@ orderbook-engine/
 │   └── run_tsan.sh          # ThreadSanitizer build + test run
 └── CMakeLists.txt           # Build configuration
 ```
+
+## AI assistance
+
+I used Claude as a coding assistant on parts of this repo. As of 2026-11-26, 18 of the 45 non-merge commits on `main`
+carry a `Co-Authored-By: Claude` trailer. I reviewed each of those commits and either committed it to `main` myself or
+merged it through a pull request.
